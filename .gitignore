@@ -1,0 +1,10 @@
+# macOS
+.DS_Store
+
+# 依赖与缓存
+node_modules/
+.cache/
+log/
+
+# 生成物含明文账号密码，绝不入库
+userscript/cockpit-codex-fill.user.js
