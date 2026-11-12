@@ -35,9 +35,9 @@
 <h1>交接文档：openai-auto-log-in（Cockpit Tools 登录自动填油猴脚本）</h1>
 
 <table class="meta">
-  <tr><th>交接时间</th><td><time datetime="2026-11-12">2026-11-12</time></td></tr>
+  <tr><th>交接时间</th><td><time datetime="2026-11-13">2026-11-13</time></td></tr>
   <tr><th>交接方向</th><td>上一会话（root agent lead） → 接手 agent</td></tr>
-  <tr><th>当前阶段</th><td>v2.2.0 功能完成（辅助邮箱 + 三个框必填），103 项断言全绿；<b>改动尚未提交/推送</b>，仓库仍是 v2.1.0 的状态</td></tr>
+  <tr><th>当前阶段</th><td>v2.3.0 功能完成（辅助邮箱 + 三个框必填 + 覆盖 ChatGPT 相关域名），103 项断言全绿</td></tr>
   <tr><th>下一步起点</th><td><code>cd /Users/seraku/Documents/DSH/cockpit-autologin &amp;&amp; node scripts/test-userscript.mjs</code> 复跑测试，然后按第 9 节决定是否提交推送</td></tr>
   <tr><th>文档状态</th><td>可交接</td></tr>
 </table>
@@ -45,7 +45,7 @@
 <section id="snapshot">
   <h2>1. 状态快照（必读，最优先）</h2>
   <ul>
-    <li class="st-done">已完成：油猴脚本 v2.2.0 —— 面板（Tampermonkey 图标菜单打开）、粘贴识别账号/密码/2FA/辅助邮箱、保存·管理·编辑·删除·批量导出、本地 TOTP 算码、一次登录只确认一次、只填不提交；辅助邮箱（取码邮箱）与「三个框必填」已实现。</li>
+    <li class="st-done">已完成：油猴脚本 v2.3.0 ——「@match」覆盖 auth.openai.com / auth0.openai.com / chatgpt.com / chat.openai.com / platform.openai.com / wzyp.cn； 面板（Tampermonkey 图标菜单打开）、粘贴识别账号/密码/2FA/辅助邮箱、保存·管理·编辑·删除·批量导出、本地 TOTP 算码、一次登录只确认一次、只填不提交；辅助邮箱（取码邮箱）与「三个框必填」已实现。</li>
     <li class="st-done">测试：<code>node scripts/test-userscript.mjs</code> 共 103 项断言全部通过（离线，取码接口与账号库都用测试桩/夹具）。</li>
     <li class="st-wip">进行中：工作区有 3 个文件未提交（<code>README.md</code>、<code>scripts/test-userscript.mjs</code>、<code>userscript/template.user.js</code>）；GitHub 上仍是 v2.1.0。</li>
     <li class="st-todo">下一个动作：跑测试确认绿，然后 <code>git add -A &amp;&amp; git commit</code>（用户要推送再 <code>git push</code>）。</li>
@@ -105,6 +105,7 @@ node --check userscript/template.user.js</code></pre>
       <tr><td>只填不提交</td><td>无 submit/location/window.open；每条填充断言表单未提交</td><td><span class="confirmed">已验证</span></td><td><code>test-userscript.mjs</code> 中「未提交表单」断言</td></tr>
       <tr><td>确认策略</td><td>一次登录只确认一次；换账号重置；手动「填入」也确认</td><td><span class="confirmed">已验证</span>：密码步不再弹确认、SPA 换步不重复确认</td><td><code>doFill()</code> 的 confirmedAccount 逻辑</td></tr>
       <tr><td>本地 TOTP</td><td>RFC 6238（SHA-1/30s/6 位），与 Node 独立实现逐位一致；有密钥时不请求取码接口</td><td><span class="confirmed">已验证</span></td><td><code>totpCode()</code>；测试「2FA：本地 TOTP 算法与独立实现一致」</td></tr>
+      <tr><td>生效域名（v2.3.0）</td><td>6 个域名均写入 @match（OpenAI 登录域 + ChatGPT + platform + 取号站）</td><td><span class="confirmed">已验证</span>：release 产物断言「覆盖 OpenAI / ChatGPT / wzyp 全部域名」</td><td><code>userscript/template.user.js</code> 头部</td></tr>
       <tr><td>辅助邮箱（v2.2.0）</td><td>第三个框可填取码邮箱；取码时用该邮箱而非登录邮箱</td><td><span class="confirmed">已验证</span>：断言「按辅助邮箱取码」请求体邮箱正确</td><td><code>normalizeCode()</code> / <code>fillCode()</code></td></tr>
       <tr><td>三个框必填（v2.2.0）</td><td>无 2FA 时第三框自动填登录邮箱；留空保存回落登录邮箱；密码为空拒绝保存</td><td><span class="confirmed">已验证</span>：3 条断言通过</td><td><code>saveCurrent()</code> / <code>updateAccount()</code></td></tr>
       <tr><td>保存/管理/编辑/删除/导出</td><td>GM 存储 <code>cockpit_saved_accounts</code>、隐藏名单 <code>cockpit_hidden_accounts</code>；导出格式 <code>邮箱----密码[ 2FA: …][ AUX: …]</code></td><td><span class="confirmed">已验证</span></td><td><code>renderManage()</code> / <code>buildExportText()</code></td></tr>

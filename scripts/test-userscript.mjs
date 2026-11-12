@@ -769,7 +769,18 @@ const panelVisible = (page) => page.evaluate(() => {
 check('release 构建无调试后门', !RELEASE.includes('__cockpitFill'));
 check('release 默认不内嵌账号', /const ACCOUNTS = \[\s*\]/.test(RELEASE) && !RELEASE.includes('vanilla_hill04'));
 check('release 构建无通配 @connect', !/@connect\s+\*/.test(RELEASE));
-check('release 匹配 auth.openai.com 与 wzyp.cn', /@match\s+https:\/\/auth\.openai\.com\/\*/.test(RELEASE) && /@match\s+https:\/\/wzyp\.cn\/\*/.test(RELEASE));
+{
+  const required = [
+    'https://auth.openai.com/*',
+    'https://auth0.openai.com/*',
+    'https://chatgpt.com/*',
+    'https://chat.openai.com/*',
+    'https://platform.openai.com/*',
+    'https://wzyp.cn/*',
+  ];
+  const missing = required.filter((u) => !RELEASE.includes(`// @match        ${u}`));
+  check('release 覆盖 OpenAI / ChatGPT / wzyp 全部域名', missing.length === 0, `缺少 ${missing.join(', ')}`);
+}
 
 console.log(JSON.stringify(results, null, 1));
 const failed = results.filter(r => r.result !== 'OK');

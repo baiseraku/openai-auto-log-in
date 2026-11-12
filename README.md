@@ -1,4 +1,4 @@
-# Cockpit Tools 登录自动填（油猴脚本 v2.2.0）
+# Cockpit Tools 登录自动填（油猴脚本 v2.3.0）
 
 在 Cockpit Tools 里点「登录」后，Safari 会打开 `auth.openai.com` 登录页。
 
@@ -43,7 +43,8 @@ node scripts/gen-userscript.mjs
    - 页面里点「点这里安装脚本」→ Tampermonkey 弹安装页 → 安装；
    - 如果 Tampermonkey 没拦截、页面只显示源码：打开 Tampermonkey 面板 →「添加新脚本 / +」→ 清空 → ⌘V 粘贴 → ⌘S 保存
      （脚本内容已经由安装助手放进剪贴板了）。
-4. 第一次在登录页生效时，Safari 可能询问是否允许 Tampermonkey 访问 `auth.openai.com`、`wzyp.cn`、`2fa.nloop.cc` → 允许。
+4. 第一次在登录页生效时，Safari 可能询问是否允许 Tampermonkey 访问 `auth.openai.com`、`chatgpt.com`、
+   `platform.openai.com`、`wzyp.cn`、`2fa.nloop.cc` 等域名 → 按提示允许。
 
 ## 用法
 
@@ -131,7 +132,9 @@ node scripts/gen-userscript.mjs
 ## 安全与限制
 
 - **明文密码 / 2FA 密钥**：面板里「保存账号」写入的密码和 2FA 密钥都存在 Tampermonkey 的 GM 存储里（明文）。若给 Tampermonkey 开了云同步，密码会随之上云 —— 请不要开同步，或只用邮箱/验证码代填。
-- 只在 `auth.openai.com` 和 `wzyp.cn` 生效（`@match` 两个域名）。其他站点要加 `@match` 后重新生成。
+- 生效域名（`@match`）：
+  `auth.openai.com`、`auth0.openai.com`、`chatgpt.com`、`chat.openai.com`、`platform.openai.com`、`wzyp.cn`。
+  其他站点要加 `@match` 后重新生成。
 - 填充规则按通用登录页写的（`input[type=email]` / `input[type=password]` / 一次性验证码输入框）；
   `wzyp.cn` 上如果是自助发号/登录页，能识别就用，识别不了面板会显示「未识别」，不会乱动页面。
 - 若某平台登录页是客户端内嵌窗口，或 Cockpit 用无痕/私密窗口打开（需额外允许扩展运行），脚本注入不到。
@@ -194,6 +197,7 @@ node --check userscript/template.user.js
 - 填充：邮箱 / 密码 / 验证码（单框、分段），每种都断言表单未被提交；
 - 确认：取消后不填值、不反复弹窗；冷却期内手动点击可重试且有反馈；
 - 自动填：localStorage 预置后开面板即填、只确认一次、不重复触发；
+- `@match` 覆盖 6 个域名（OpenAI 登录域 + ChatGPT + 取号站）；
 - SPA 换步（URL+DOM 同时变）：email→密码、email→验证码都不再重复确认，验证码只取码 1 次；
 - release 产物：无调试后门、无通配 `@connect`、同时匹配 `auth.openai.com` 与 `wzyp.cn`。
 

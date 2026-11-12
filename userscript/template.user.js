@@ -1,10 +1,14 @@
 // ==UserScript==
 // @name         Cockpit 登录自动填（Codex / ChatGPT）
 // @namespace    cockpit-autologin
-// @version      2.2.0
+// @version      2.3.0
 // @description  点 Tampermonkey 图标 →「打开面板」，粘贴识别账号、保存到插件、管理删除；填入邮箱 / 密码 / 动态验证码，每次填入前先确认，且不点提交。
 // @author       cockpit-autologin
 // @match        https://auth.openai.com/*
+// @match        https://auth0.openai.com/*
+// @match        https://chatgpt.com/*
+// @match        https://chat.openai.com/*
+// @match        https://platform.openai.com/*
 // @match        https://wzyp.cn/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_registerMenuCommand
