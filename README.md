@@ -1,4 +1,4 @@
-# Cockpit Tools 登录自动填（油猴脚本 v2.3.1）
+# Cockpit Tools 登录自动填（油猴脚本 v2.3.2）
 
 在 Cockpit Tools 里点「登录」后，Safari 会打开 `auth.openai.com` 登录页。
 
@@ -61,7 +61,9 @@ node scripts/gen-userscript.mjs
    | `PASSWORD123----user01@example.com`（密码在前） | 同上（邮箱正则不允许连续连字符，不会把 `PASSWORD123----user01` 当邮箱） |
    | `账号：user01@example.com 密码：PASSWORD123`（也认 `password: …`、`pass: …`、`pwd: …`，全角 `：` 同样有效） | 同上 |
    | 只有 `user01@example.com` | 只识别邮箱；若这个邮箱在已保存列表里会回退用其密码，否则密码步骤需要你手填 |
-   | `user01@example.com----PASSWORD123 2FA: JBSWY3DPEHPK3PXP` | 邮箱 + 密码 + 2FA 密钥（也认 `密钥：`、`totp:`、`otpauth://…?secret=…` 链接） |
+   | `user01@example.com----PASSWORD123 2FA: JBSWY3DPEHPK3PXP` | 邮箱 + 密码 + 2FA 密钥（也认 `密钥：`、`MFA:`、`OTP:`、`otpauth://…?secret=…` 链接） |
+   | `user01@example.com----PASSWORD123----JBSWY3DPEHPK3PXP` | 同上（三段写法：邮箱 / 密码 / 2FA 密钥） |
+   | `user01@example.com\|PASSWORD123\|JBSWY3DPEHPK3PXP` | 同上 |
 
    - 密码候选会做校验（ASCII 可见字符、4–64 位、含字母或数字、不是「另一个邮箱地址」或「密码/账号」这类标签词；
      密码本身以 `Pass:`/`password:` 开头时会回退为整段当密码），
@@ -96,6 +98,7 @@ node scripts/gen-userscript.mjs
    | 第三个框 | **取码方式**：2FA 密钥（base32）或取码邮箱，二选一 |
 
    - 验证码统一从第三个框取：是 base32 → 本地算 TOTP；是邮箱 → 用这个邮箱去取码服务查码；
+   - 第三个框可以直接粘 `2FA: 密钥`、`密钥：密钥`、带 `=` 填充的密钥、`otpauth://…?secret=…` 链接，会自动去掉前缀；
    - **没有 2FA 的账号**，第三个框留空保存时会**自动填成登录邮箱**（等价于"用登录邮箱取码"，和原来一样）；
    - 登录邮箱改过、但 MFA 仍由原邮箱收码的账号：第三个框填**辅助（原）邮箱**，取码就走原邮箱；
    - 密码为空不允许保存；第三个框内容既不是邮箱也不是 base32 时会被拒绝并提示。
@@ -156,7 +159,7 @@ openai-auto-log-in/
 ├── scripts/
 │   ├── gen-userscript.mjs      # 主入口：只读账号库 → 生成油猴脚本（600 权限，原子写入；--embed 内嵌账号，--debug 带测试钩子，--fixture 内嵌假账号）
 │   ├── install.mjs             # 安装助手：本地 HTTP 提供 .user.js + 复制到剪贴板 + 打开 Safari（不拖拽）
-│   ├── test-userscript.mjs     # 假登录页自动化测试（106 项断言，见下）
+│   ├── test-userscript.mjs     # 假登录页自动化测试（120 项断言，见下）
 │   ├── login.mjs               # 实验性：全自动登录（不推荐日常用，未纳入本方案）
 │   └── lib/
 │       ├── cockpit-store.mjs   # 只读解析 ~/.cockpit_tools 加密账号库
@@ -177,7 +180,7 @@ openai-auto-log-in/
 ## 测试
 
 ```bash
-node scripts/test-userscript.mjs   # 106 项断言，仅需本机 Chrome（取码接口用测试桩，不联网）
+node scripts/test-userscript.mjs   # 120 项断言，仅需本机 Chrome（取码接口用测试桩，不联网）
 node --check userscript/template.user.js
 ```
 

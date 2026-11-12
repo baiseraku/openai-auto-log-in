@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cockpit 登录自动填（Codex / ChatGPT）
 // @namespace    cockpit-autologin
-// @version      2.3.1
+// @version      2.3.2
 // @description  点 Tampermonkey 图标 →「打开面板」，粘贴识别账号、保存到插件、管理删除；填入邮箱 / 密码 / 动态验证码，每次填入前先确认，且不点提交。
 // @author       cockpit-autologin
 // @match        https://auth.openai.com/*
@@ -270,6 +270,23 @@ __CONNECT_LINES__
    * 支持：a@b.com----Pass1234 / |, :, 空格分隔 / Pass1234----a@b.com /
    *       账号：a@b.com 密码：Pass1234 / password: Pass1234
    */
+  const BASE32_RE = /^[A-Z2-7]{16,64}$/;
+  const trimSecret = (v) => String(v || '').replace(/[\s\-=]/g, '').toUpperCase();
+
+  /** 邮箱后面的分段：拆出「密码」和「2FA 密钥」（应对 邮箱----密码----密钥 / 邮箱|密码|密钥） */
+  function splitAfterEmail(raw, emailEnd, fallbackPwd) {
+    const rest = raw.slice(emailEnd);
+    const toks = rest.split(/(?:-{2,}|[\s|,;]+)/).map((t) => cleanPassword(t)).filter(Boolean);
+    if (!toks.length) return null;
+    const first = toks[0];
+    const second = toks[1] ? trimSecret(toks[1]) : '';
+    const dirty = /-{2,}|[|]/.test(fallbackPwd || '');   // 只在密码被多段格式污染时才纠偏
+    if (!plausiblePassword(first)) return null;
+    // 只有出现了第三段、且第三段像 base32 时才认定 2FA
+    const twofa = second && BASE32_RE.test(second) ? second : '';
+    return { password: first, twofa, dirty };
+  }
+
   function parsePasted(text) {
     const raw = String(text || '').trim();
     if (!raw) return null;
@@ -289,10 +306,21 @@ __CONNECT_LINES__
     }
     if (!picked) picked = emails[0];
     if (!pwd && labelPwd) pwd = labelPwd;
+
+    let twofa = extractTwofa(raw, pwd);
+    // 密码被多段格式污染（如「邮箱----密码----2FA密钥」）时，按分段重新取
+    const triple = splitAfterEmail(raw, picked.end, pwd);
+    if (triple && triple.dirty) {
+      pwd = triple.password;
+      if (!twofa && triple.twofa) twofa = triple.twofa;
+    } else if (!twofa && triple && triple.twofa && pwd === triple.password) {
+      twofa = triple.twofa;
+    }
+
     return {
       email: picked.email,
       password: pwd,
-      twofa: extractTwofa(raw, pwd),
+      twofa,
       auxEmail: extractAuxEmail(raw, picked.email),
     };
   }
@@ -329,12 +357,16 @@ __CONNECT_LINES__
 
   /** 2FA 输入框统一解析：填邮箱 → 辅助邮箱；填 base32 → 2FA 密钥（二选一） */
   function parseCodeField(value) {
-    const raw = String(value || '').trim();
+    let raw = String(value || '').trim();
     if (!raw) return { twofa: '', codeEmail: '' };
+    // 允许直接粘「2FA: 密钥」「密钥=密钥」「otpauth://…」
+    const uri = raw.match(/[?&]secret=([A-Za-z2-7]+)/i);
+    if (uri) return { twofa: uri[1].toUpperCase(), codeEmail: '' };
+    raw = raw.replace(/^(?:2fa|mfa|totp|otp|twofa|authenticator|密钥|密鑰|二次验证|二步验证|验证密钥)\s*[:：=]\s*/i, '');
     const mail = raw.match(EMAIL_RE);
     if (mail && mail[0]) return { twofa: '', codeEmail: mail[0] };
-    const secret = raw.replace(/[\s\-]/g, '').toUpperCase();
-    if (/^[A-Z2-7]{16,}$/.test(secret)) return { twofa: secret, codeEmail: '' };
+    const secret = trimSecret(raw);
+    if (BASE32_RE.test(secret)) return { twofa: secret, codeEmail: '' };
     return { twofa: '', codeEmail: '', invalid: true };
   }
 
@@ -1120,6 +1152,8 @@ __CONNECT_LINES__
         select(email) { acctSel.value = email; acctSel.dispatchEvent(new Event('change')); },
         setPaste(text) { $('paste').value = text; applyPaste(text); },
         pasteValue: () => $('paste').value,
+        parse: (text) => parsePasted(text),
+        codeField: (v) => parseCodeField(v),
         who: () => $('who').textContent,
         setAuto(v) { $('auto').checked = !!v; $('auto').dispatchEvent(new Event('change')); },
         fill() { return doFill({ manual: true }); },

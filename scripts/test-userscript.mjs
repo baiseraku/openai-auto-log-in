@@ -604,6 +604,57 @@ const panelVisible = (page) => page.evaluate(() => {
   await page.context().close();
 }
 
+// ---------- 10.43 2FA 识别：三段格式与编辑框各种写法 ----------
+{
+  const page = await newPage();
+  await openPanelViaMenu(page);
+  const cases = [
+    ['three.a@example.com----Pwd123----' + TFA_SECRET, 'Pwd123', TFA_SECRET],
+    ['three.b@example.com|Pwd123|' + TFA_SECRET, 'Pwd123', TFA_SECRET],
+    ['three.c@example.com----Pwd123 2FA: ' + TFA_SECRET, 'Pwd123', TFA_SECRET],
+    ['three.d@example.com----Pwd123\n' + TFA_SECRET, 'Pwd123', TFA_SECRET],
+    ['three.e@example.com----Pass:123', 'Pass:123', ''],
+  ];
+  for (const [text, wantPwd, wantTfa] of cases) {
+    const r = await page.evaluate((t) => window.__cockpitFill.parse(t), text);
+    check(`2FA 解析：${text.split('\n')[0].slice(0, 40)}`,
+      r && r.password === wantPwd && r.twofa === wantTfa,
+      JSON.stringify({ pwd: r && r.password, twofa: r && r.twofa }));
+  }
+  const fields = [
+    ['2FA: ' + TFA_SECRET, TFA_SECRET],
+    ['密钥：' + TFA_SECRET, TFA_SECRET],
+    [TFA_SECRET + '====', TFA_SECRET],
+    ['otpauth://totp/x?secret=' + TFA_SECRET, TFA_SECRET],
+    [TFA_SECRET.toLowerCase(), TFA_SECRET],
+  ];
+  for (const [input, want] of fields) {
+    const r = await page.evaluate((v) => window.__cockpitFill.codeField(v), input);
+    check(`编辑框识别 2FA：${input.slice(0, 26)}`, r.twofa === want, JSON.stringify(r));
+  }
+  const asEmail = await page.evaluate(() => window.__cockpitFill.codeField('old.mail@example.com'));
+  check('编辑框识别：邮箱仍判为取码邮箱', asEmail.codeEmail === 'old.mail@example.com' && asEmail.twofa === '');
+  await page.context().close();
+}
+{
+  // 三段格式保存后，验证码页走本地 TOTP（不请求取码接口）
+  const page = await newPage({ path: '/mfa' });
+  await openPanelViaMenu(page);
+  await page.evaluate((sec) => window.__cockpitFill.setPaste(`three.save@example.com----Pwd123----${sec}`), TFA_SECRET);
+  await page.evaluate(() => window.__cockpitFill.save());
+  await page.waitForTimeout(300);
+  check('2FA 三段格式：保存后带密钥',
+    (await page.evaluate(() => window.__cockpitFill.twofaOf('three.save@example.com'))) === TFA_SECRET);
+  gmCalls = 0;
+  await page.evaluate(() => window.__cockpitFill.select('three.save@example.com'));
+  await page.evaluate(() => window.__cockpitFill.fill());
+  await page.waitForTimeout(1500);
+  const got = await val(page, 'input[name=code]');
+  check('2FA 三段格式：验证码用本地 TOTP 填上', /^\d{6}$/.test(got || ''), String(got));
+  check('2FA 三段格式：不请求取码接口', gmCalls === 0, `${gmCalls} 次请求`);
+  await page.context().close();
+}
+
 // ---------- 10.44 粘贴兜底（站点拦截默认粘贴时仍能识别） ----------
 {
   // 站点在捕获阶段 preventDefault 掉 paste，脚本自己的 paste 处理仍要把内容读走并解析
