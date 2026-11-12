@@ -1,4 +1,4 @@
-# Cockpit Tools 登录自动填（油猴脚本 v2.3.0）
+# Cockpit Tools 登录自动填（油猴脚本 v2.3.1）
 
 在 Cockpit Tools 里点「登录」后，Safari 会打开 `auth.openai.com` 登录页。
 
@@ -69,6 +69,8 @@ node scripts/gen-userscript.mjs
      所以 `user01@example.com 请勿修改密码`、`user01@example.com----`（空密码）都不会把干扰文本当密码。
    - 面板和确认框里密码默认**掩码显示**（如 `RV**76`），点面板那行字可切换显示/隐藏，方便你填入前核对。
    - 识别不到邮箱时面板提示「没识别到邮箱，检查粘贴内容」，不会乱填。
+   - 如果 ⌘V 粘不进去（少数站点会拦截粘贴），点面板上的 **「读剪贴板」** 按钮，脚本会自己读剪贴板；
+     仍然不行就直接在框里手打。
    - **同邮箱会自动合并**：粘贴的邮箱如果账号库里已经存在，不会多出一个重复条目 —— 直接选中库内那条，
      并**用粘贴的密码覆盖库内密码**（取码地址仍用库内配置），面板提示「已合并到库内账号：… （覆盖库内密码）」。
    - 也可以不用粘贴，直接从下拉框选**账号库里已有的账号**（粘贴后再选库内账号会以库内账号为准）。
@@ -154,7 +156,7 @@ openai-auto-log-in/
 ├── scripts/
 │   ├── gen-userscript.mjs      # 主入口：只读账号库 → 生成油猴脚本（600 权限，原子写入；--embed 内嵌账号，--debug 带测试钩子，--fixture 内嵌假账号）
 │   ├── install.mjs             # 安装助手：本地 HTTP 提供 .user.js + 复制到剪贴板 + 打开 Safari（不拖拽）
-│   ├── test-userscript.mjs     # 假登录页自动化测试（103 项断言，见下）
+│   ├── test-userscript.mjs     # 假登录页自动化测试（106 项断言，见下）
 │   ├── login.mjs               # 实验性：全自动登录（不推荐日常用，未纳入本方案）
 │   └── lib/
 │       ├── cockpit-store.mjs   # 只读解析 ~/.cockpit_tools 加密账号库
@@ -175,7 +177,7 @@ openai-auto-log-in/
 ## 测试
 
 ```bash
-node scripts/test-userscript.mjs   # 103 项断言，仅需本机 Chrome（取码接口用测试桩，不联网）
+node scripts/test-userscript.mjs   # 106 项断言，仅需本机 Chrome（取码接口用测试桩，不联网）
 node --check userscript/template.user.js
 ```
 

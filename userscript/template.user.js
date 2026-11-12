@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cockpit 登录自动填（Codex / ChatGPT）
 // @namespace    cockpit-autologin
-// @version      2.3.0
+// @version      2.3.1
 // @description  点 Tampermonkey 图标 →「打开面板」，粘贴识别账号、保存到插件、管理删除；填入邮箱 / 密码 / 动态验证码，每次填入前先确认，且不点提交。
 // @author       cockpit-autologin
 // @match        https://auth.openai.com/*
@@ -451,7 +451,9 @@ __CONNECT_LINES__
                background:#1b1d20; color:#eee; border:1px solid rgba(255,255,255,.13); }
       textarea { width:100%; box-sizing:border-box; margin:6px 0 6px; padding:6px 8px; border-radius:8px;
                  background:#1b1d20; color:#eee; border:1px solid rgba(255,255,255,.13);
-                 font:12px -apple-system, "PingFang SC", sans-serif; resize:vertical; }
+                 font:12px -apple-system, "PingFang SC", sans-serif; resize:vertical;
+                 -webkit-user-select: text; user-select: text; -webkit-user-modify: read-write-plaintext-only; }
+      input[type="text"] { -webkit-user-select: text; user-select: text; }
       .row { display:flex; gap:8px; }
       button { flex:1; padding:7px 10px; border-radius:8px; cursor:pointer; background:#2f6f5a; color:#fff; border:none; }
       button.ghost { background:#2a2d31; color:#cfd2d6; }
@@ -485,6 +487,7 @@ __CONNECT_LINES__
         <button id="again" class="ghost">重填</button>
       </div>
       <div class="row2">
+        <button id="clip" class="ghost" title="把剪贴板内容读进上面的框">读剪贴板</button>
         <button id="save" class="ghost">保存账号</button>
         <button id="manage" class="ghost">管理</button>
         <button id="export" class="ghost">导出</button>
@@ -660,6 +663,28 @@ __CONNECT_LINES__
   $('paste').addEventListener('input', () => {
     clearTimeout(pasteTimer);
     pasteTimer = setTimeout(() => applyPaste($('paste').value), 250);
+  });
+
+  // 有些站点会在捕获阶段拦掉 paste 的默认行为，这里自己取剪贴板内容再解析
+  $('paste').addEventListener('paste', (e) => {
+    let text = '';
+    try { text = (e.clipboardData || window.clipboardData).getData('text') || ''; } catch {}
+    if (!text) return;                     // 拿不到就让浏览器默认粘贴
+    e.preventDefault();
+    $('paste').value = text;
+    applyPaste(text);
+  });
+
+  $('clip').addEventListener('click', async () => {
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.readText) throw new Error('no clipboard');
+      const text = await navigator.clipboard.readText();
+      if (!text || !text.trim()) { setStatus('剪贴板是空的', true); return; }
+      $('paste').value = text;
+      applyPaste(text);
+    } catch (e) {
+      setStatus('读不到剪贴板：请手动 ⌘V 粘到上面的框，或直接手打', true);
+    }
   });
 
   $('auto').addEventListener('change', (e) => {
@@ -1111,6 +1136,13 @@ __CONNECT_LINES__
         hidden: () => hiddenAccounts.slice(),
         restore: (email) => restoreEmbedded(email),
         exportText: () => buildExportText(),
+        pasteValue: () => $('paste').value,
+        pasteInto(text) {
+          const dt = new DataTransfer();
+          dt.setData('text/plain', text);
+          $('paste').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+        },
+        clip: () => $('clip').click(),
         sections: () => [...$('mgmt-list').querySelectorAll('.mgmt-title')].map((e) => e.textContent),
         confirmedAccount: () => state.confirmedAccount,
         updateAccount: (orig, fields) => updateAccount(orig, fields),

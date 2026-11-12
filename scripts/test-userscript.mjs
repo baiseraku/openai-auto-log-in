@@ -118,6 +118,15 @@ async function newPage({ path: pagePath = '/log-in', dialogBehavior = 'accept', 
 
   await page.addInitScript((presetArg) => {
     try {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          readText: async () => window.__clipText || '',
+          writeText: async () => {},
+        },
+      });
+    } catch {}
+    try {
       localStorage.setItem('cockpit_fill_debug', '1');
       if (presetArg) {
         if (presetArg.account) localStorage.setItem('cockpit_fill_account', presetArg.account);
@@ -592,6 +601,34 @@ const panelVisible = (page) => page.evaluate(() => {
   const accounts = await page.evaluate(() => window.__cockpitFill.accounts());
   check('编辑库内账号：新邮箱出现', accounts.includes('renamed.lib@example.com'));
   check('编辑库内账号：旧邮箱隐藏', !accounts.includes(GOOD));
+  await page.context().close();
+}
+
+// ---------- 10.44 粘贴兜底（站点拦截默认粘贴时仍能识别） ----------
+{
+  // 站点在捕获阶段 preventDefault 掉 paste，脚本自己的 paste 处理仍要把内容读走并解析
+  const page = await newPage();
+  await page.evaluate(() => {
+    document.addEventListener('paste', (e) => e.preventDefault(), true);
+  });
+  await openPanelViaMenu(page);
+  await page.evaluate(() => window.__cockpitFill.pasteInto('paste.hook@example.com----PastePwd9'));
+  await page.waitForTimeout(400);
+  const who = await page.evaluate(() => window.__cockpitFill.who());
+  const boxVal = await page.evaluate(() => window.__cockpitFill.pasteValue());
+  check('粘贴兜底：站点拦截默认粘贴仍能识别', /paste\.hook@example\.com/.test(who), who);
+  check('粘贴兜底：框里也写入了内容', boxVal === 'paste.hook@example.com----PastePwd9', boxVal);
+  await page.context().close();
+}
+{
+  // 「读剪贴板」按钮：不依赖真实剪贴板，读到的内容直接解析
+  const page = await newPage();
+  await openPanelViaMenu(page);
+  await page.evaluate(() => { window.__clipText = 'clip.board@example.com----ClipPwd7'; });
+  await page.evaluate(() => window.__cockpitFill.clip());
+  await page.waitForTimeout(400);
+  const who = await page.evaluate(() => window.__cockpitFill.who());
+  check('粘贴兜底：读剪贴板按钮可用', /clip\.board@example\.com/.test(who), who);
   await page.context().close();
 }
 
