@@ -95,14 +95,19 @@ async function newPage({ path: pagePath = '/log-in', dialogBehavior = 'accept', 
   page.dialogs = () => dialogs;
   page.dialogMessages = () => dialogMessages;
 
+  const codeEmailLog = [];
+  page.codeEmails = () => codeEmailLog;
   await page.exposeFunction('__gmFetch', async (url, body) => {
     gmCalls++;
     if (failMode) throw new Error('simulated network failure');
     // 取码接口用固定响应，测试不依赖外网、可复现
     if (String(url).includes('/api/mfa/lookup')) {
+      let asked = '';
+      try { asked = JSON.parse(body || '{}').email || ''; } catch {}
+      codeEmailLog.push(asked);
       return JSON.stringify({
         ok: true,
-        email: JSON.parse(body || '{}').email,
+        email: asked,
         found: true,
         results: [{ service: 'ChatGPT', code: '123456', remaining: 25, period: 30 }],
       });
@@ -538,7 +543,7 @@ const panelVisible = (page) => page.evaluate(() => {
   await openPanelViaMenu(page);
   await page.evaluate((sec) => window.__cockpitFill.setPaste(`tfa.user@example.com----Pwd123456 2FA: ${sec}`), TFA_SECRET);
   const who = await page.evaluate(() => window.__cockpitFill.who());
-  check('2FA：粘贴里能识别出密钥', /2FA 已配置/.test(who), who);
+  check('2FA：粘贴里能识别出密钥', /取码：2FA/.test(who), who);
   await page.evaluate(() => window.__cockpitFill.save());
   await page.waitForTimeout(200);
   check('2FA：保存后账号带密钥', (await page.evaluate(() => window.__cockpitFill.twofaOf('tfa.user@example.com'))) === TFA_SECRET);
@@ -587,6 +592,129 @@ const panelVisible = (page) => page.evaluate(() => {
   const accounts = await page.evaluate(() => window.__cockpitFill.accounts());
   check('编辑库内账号：新邮箱出现', accounts.includes('renamed.lib@example.com'));
   check('编辑库内账号：旧邮箱隐藏', !accounts.includes(GOOD));
+  await page.context().close();
+}
+
+// ---------- 10.45 辅助邮箱（改过登录邮箱，MFA 仍用原邮箱取码） ----------
+{
+  // 粘贴里带辅助邮箱 → 保存后账号带 codeEmail，且验证码页按辅助邮箱取码
+  const page = await newPage();
+  await openPanelViaMenu(page);
+  await page.evaluate(() => window.__cockpitFill.setPaste(
+    'new.login@example.com----SomePwd123 辅助邮箱: old.mail@example.com'));
+  const who = await page.evaluate(() => window.__cockpitFill.who());
+  check('辅助邮箱：粘贴识别到辅助邮箱', /取码邮箱 old\.mail@example\.com/.test(who), who);
+  await page.evaluate(() => window.__cockpitFill.save());
+  await page.waitForTimeout(300);
+  check('辅助邮箱：保存后账号带取码邮箱',
+    (await page.evaluate(() => window.__cockpitFill.codeEmailOf('new.login@example.com'))) === 'old.mail@example.com');
+
+  await page.goto(base + '/mfa', { waitUntil: 'domcontentloaded' });
+  await page.addScriptTag({ content: USERSCRIPT });
+  await page.waitForFunction(() => !!window.__cockpitFill, null, { timeout: 5000 });
+  await openPanelViaMenu(page);
+  await page.evaluate(() => window.__cockpitFill.select('new.login@example.com'));
+  await page.evaluate(() => window.__cockpitFill.fill());
+  await page.waitForTimeout(1500);
+  const asked = page.codeEmails();
+  check('辅助邮箱：按辅助邮箱取码', asked[0] === 'old.mail@example.com', `请求邮箱 ${asked[0]}`);
+  check('辅助邮箱：验证码填上', /^\d{6}$/.test((await val(page, 'input[name=code]')) || ''));
+  await page.context().close();
+}
+{
+  // 没有辅助邮箱的账号，仍按登录邮箱取码（原有行为不变）
+  const page = await newPage({ path: '/mfa' });
+  await openPanelViaMenu(page);
+  await page.evaluate(() => window.__cockpitFill.setPaste('plain.mail@example.com----SomePwd123'));
+  await page.evaluate(() => window.__cockpitFill.save());
+  await page.waitForTimeout(300);
+  await page.evaluate(() => window.__cockpitFill.select('plain.mail@example.com'));
+  await page.evaluate(() => window.__cockpitFill.fill());
+  await page.waitForTimeout(1500);
+  const asked = page.codeEmails();
+  check('辅助邮箱：没填辅助邮箱仍用登录邮箱取码', asked[0] === 'plain.mail@example.com', `请求邮箱 ${asked[0]}`);
+  await page.context().close();
+}
+{
+  // 编辑框二合一：填邮箱 → 存为辅助邮箱；填 base32 → 存为 2FA；且两者互斥
+  const page = await newPage();
+  await openPanelViaMenu(page);
+  await page.evaluate(() => window.__cockpitFill.setPaste('multi@example.com----SomePwd123'));
+  await page.evaluate(() => window.__cockpitFill.save());
+  await page.waitForTimeout(200);
+
+  await page.evaluate(() => window.__cockpitFill.updateAccount('multi@example.com', { code: 'legacy@example.com' }));
+  await page.waitForTimeout(200);
+  check('编辑框：填邮箱存为辅助邮箱',
+    (await page.evaluate(() => window.__cockpitFill.codeEmailOf('multi@example.com'))) === 'legacy@example.com');
+  check('编辑框：填邮箱时 2FA 为空',
+    (await page.evaluate(() => window.__cockpitFill.twofaOf('multi@example.com'))) === '');
+
+  await page.evaluate((sec) => window.__cockpitFill.updateAccount('multi@example.com', { code: sec }), TFA_SECRET);
+  await page.waitForTimeout(200);
+  check('编辑框：填 base32 存为 2FA',
+    (await page.evaluate(() => window.__cockpitFill.twofaOf('multi@example.com'))) === TFA_SECRET);
+  check('编辑框：填 2FA 时辅助邮箱清空',
+    (await page.evaluate(() => window.__cockpitFill.codeEmailOf('multi@example.com'))) === '');
+
+  const bad = await page.evaluate(() => window.__cockpitFill.updateAccount('multi@example.com', { code: '既不是邮箱也不是密钥' }));
+  check('编辑框：非法内容被拒绝', bad === false, String(bad));
+  await page.context().close();
+}
+{
+  // 导出带 AUX，且能原样粘回识别
+  const page = await newPage();
+  await openPanelViaMenu(page);
+  await page.evaluate(() => window.__cockpitFill.setPaste('aux.export@example.com----SomePwd123 原邮箱: legacy.go@example.com'));
+  await page.evaluate(() => window.__cockpitFill.save());
+  await page.waitForTimeout(200);
+  const text = await page.evaluate(() => window.__cockpitFill.exportText());
+  check('辅助邮箱：导出带 AUX', text.includes('aux.export@example.com----SomePwd123 AUX: legacy.go@example.com'), text.slice(0, 120));
+  const auxLine = text.split('\n').find((l) => l.startsWith('aux.export@example.com'));
+  await page.evaluate((t) => window.__cockpitFill.setPaste(t), auxLine);
+  const who = await page.evaluate(() => window.__cockpitFill.who());
+  check('辅助邮箱：导出的 AUX 能粘回识别', /取码邮箱 legacy\.go@example\.com/.test(who), who);
+  await page.context().close();
+}
+
+// ---------- 10.47 三个框必填：第三框没 2FA 时自动填登录邮箱 ----------
+{
+  const page = await newPage();
+  await openPanelViaMenu(page);
+  await page.evaluate(() => window.__cockpitFill.setPaste('three.box@example.com----SomePwd123'));
+  await page.evaluate(() => window.__cockpitFill.save());
+  await page.waitForTimeout(300);
+  check('三个框：无 2FA 时第三框自动存为登录邮箱',
+    (await page.evaluate(() => window.__cockpitFill.codeEmailOf('three.box@example.com'))) === 'three.box@example.com');
+  check('三个框：此时没有 2FA 密钥',
+    (await page.evaluate(() => window.__cockpitFill.twofaOf('three.box@example.com'))) === '');
+  await page.context().close();
+}
+{
+  // 编辑框打开时第三框预填登录邮箱；留空保存自动回落登录邮箱
+  const page = await newPage();
+  await openPanelViaMenu(page);
+  await page.evaluate(() => window.__cockpitFill.setPaste('prefill@example.com----SomePwd123 辅助邮箱: old.prefill@example.com'));
+  await page.evaluate(() => window.__cockpitFill.save());
+  await page.waitForTimeout(300);
+  await page.evaluate(() => window.__cockpitFill.updateAccount('prefill@example.com', { code: '' }));
+  await page.waitForTimeout(300);
+  check('三个框：第三框留空回落登录邮箱',
+    (await page.evaluate(() => window.__cockpitFill.codeEmailOf('prefill@example.com'))) === 'prefill@example.com');
+  await page.context().close();
+}
+{
+  // 密码为空时不允许保存（三框必须填满）
+  const page = await newPage();
+  await openPanelViaMenu(page);
+  await page.evaluate(() => window.__cockpitFill.setPaste('nopwd@example.com'));
+  await page.evaluate(() => window.__cockpitFill.save());
+  await page.waitForTimeout(400);
+  const saved = await page.evaluate(() => window.__cockpitFill.saved());
+  const st = await page.evaluate(() => window.__cockpitFill.status());
+  check('三个框：密码为空拒绝保存', !saved.includes('nopwd@example.com') && /三个框都要填满/.test(st), st);
+  const bad = await page.evaluate(() => window.__cockpitFill.updateAccount('nopwd@example.com', { email: 'nopwd2@example.com', password: '', code: 'nopwd2@example.com' }));
+  check('三个框：编辑时密码为空被拒绝', bad === false, String(bad));
   await page.context().close();
 }
 

@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>交接文档 — openai-auto-log-in（Cockpit Tools 登录自动填油猴脚本）</title>
+<style>
+  :root { --ink:#1a1a1a; --muted:#667; --line:#d8dce8; --bg:#fafafa; --accent:#2563eb; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         color: var(--ink); background: var(--bg); margin: 0; line-height: 1.75; }
+  main { max-width: 880px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+  h1 { font-size: 1.6rem; border-bottom: 3px solid var(--accent); padding-bottom: .4rem; }
+  h2 { font-size: 1.2rem; margin-top: 2.4rem; border-left: 4px solid var(--accent); padding-left: .6rem; }
+  table { border-collapse: collapse; width: 100%; margin: .8rem 0; background: #fff; font-size: .95rem; }
+  th, td { border: 1px solid var(--line); padding: .45rem .65rem; text-align: left; vertical-align: top; }
+  th { background: #eef2ff; }
+  code { background: #eceefc; padding: .1rem .35rem; border-radius: 4px; font-size: .9em; word-break: break-all; }
+  pre { background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: .8rem 1rem; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  .meta td:first-child { width: 9em; background: #eef2ff; font-weight: 600; }
+  .confirmed { color: #047857; font-weight: 600; }
+  .assumed   { color: #b45309; font-weight: 600; }
+  .unknown   { color: #9f1239; font-weight: 600; }
+  .st-done::before    { content: "✅ "; }
+  .st-wip::before     { content: "🔄 "; }
+  .st-blocked::before { content: "⛔ "; }
+  .st-todo::before    { content: "⏭️ "; }
+  .note { color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>交接文档：openai-auto-log-in（Cockpit Tools 登录自动填油猴脚本）</h1>
+
+<table class="meta">
+  <tr><th>交接时间</th><td><time datetime="2026-11-12">2026-11-12</time></td></tr>
+  <tr><th>交接方向</th><td>上一会话（root agent lead） → 接手 agent</td></tr>
+  <tr><th>当前阶段</th><td>v2.2.0 功能完成（辅助邮箱 + 三个框必填），103 项断言全绿；<b>改动尚未提交/推送</b>，仓库仍是 v2.1.0 的状态</td></tr>
+  <tr><th>下一步起点</th><td><code>cd /Users/seraku/Documents/DSH/cockpit-autologin &amp;&amp; node scripts/test-userscript.mjs</code> 复跑测试，然后按第 9 节决定是否提交推送</td></tr>
+  <tr><th>文档状态</th><td>可交接</td></tr>
+</table>
+
+<section id="snapshot">
+  <h2>1. 状态快照（必读，最优先）</h2>
+  <ul>
+    <li class="st-done">已完成：油猴脚本 v2.2.0 —— 面板（Tampermonkey 图标菜单打开）、粘贴识别账号/密码/2FA/辅助邮箱、保存·管理·编辑·删除·批量导出、本地 TOTP 算码、一次登录只确认一次、只填不提交；辅助邮箱（取码邮箱）与「三个框必填」已实现。</li>
+    <li class="st-done">测试：<code>node scripts/test-userscript.mjs</code> 共 103 项断言全部通过（离线，取码接口与账号库都用测试桩/夹具）。</li>
+    <li class="st-wip">进行中：工作区有 3 个文件未提交（<code>README.md</code>、<code>scripts/test-userscript.mjs</code>、<code>userscript/template.user.js</code>）；GitHub 上仍是 v2.1.0。</li>
+    <li class="st-todo">下一个动作：跑测试确认绿，然后 <code>git add -A &amp;&amp; git commit</code>（用户要推送再 <code>git push</code>）。</li>
+  </ul>
+</section>
+
+<section id="goal">
+  <h2>2. 目标、范围与验收标准</h2>
+  <ul>
+    <li><b>目标：</b>把 Cockpit Tools 里点「登录」后手动填邮箱/密码/一次性验证码的流程，变成油猴脚本自动填（只填不提交）。</li>
+    <li><b>原始需求（节选）：</b>「就只要帮我填就行，其他我可以来操作，每次填之前先询问我使用哪个账号的账号密码」「能不能做成油猴插件」「把当前2FA框改为既可以填入2FA又可以填入辅助邮箱，自动识别并填入对应验证码」「现在可以要求每个账号都要把三个框填满，验证码都从最后一个框用对应方法获取。如果没有2fa就自动把第一个邮箱账号填入最后一个框」</li>
+    <li><b>范围边界：</b>做：Safari/Tampermonkey 油猴脚本 + 生成/安装/测试脚本。不做：Cockpit Tools 的任何改造（只读它的账号库）、不自动点提交、不接管客户端内嵌登录窗口。</li>
+    <li><b>用户约束：</b>不修改 Cockpit Tools 配置与数据；提交到 <code>https://github.com/baiseraku/openai-auto-log-in</code> 前必须给本机账号脱敏。</li>
+    <li><b>验收标准：</b><code>node scripts/test-userscript.mjs</code> 退出码 0、断言全绿；<code>node scripts/gen-userscript.mjs</code> 生成的脚本 <code>node --check</code> 通过；release 产物无 <code>__cockpitFill</code> 调试后门。</li>
+  </ul>
+</section>
+
+<section id="files">
+  <h2>3. 目录与关键文件</h2>
+  <table>
+    <thead><tr><th>路径</th><th>用途 / 状态</th><th>输入来源 / 输出去向</th></tr></thead>
+    <tbody>
+      <tr><td><code>userscript/template.user.js</code></td><td>油猴脚本模板（唯一需手工改的源文件）</td><td>由 <code>gen-userscript.mjs</code> 注入账号后生成产物</td></tr>
+      <tr><td><code>userscript/cockpit-codex-fill.user.js</code></td><td>本地生成物，<b>含明文密码，已被 .gitignore 排除，勿提交</b></td><td>输出给 Tampermonkey 安装</td></tr>
+      <tr><td><code>scripts/gen-userscript.mjs</code></td><td>主入口：只读账号库 → 生成脚本；<code>--embed</code> 内嵌账号库、<code>--fixture</code> 内嵌假账号（测试用）、<code>--debug</code> 保留调试钩子</td><td>读 <code>~/.cockpit_tools</code>；写 <code>userscript/cockpit-codex-fill.user.js</code>（600 权限、原子写入）</td></tr>
+      <tr><td><code>scripts/install.mjs</code></td><td>安装助手：本地 HTTP 提供 .user.js + 复制到剪贴板 + 打开 Safari（规避 Safari 27.x 拖放崩溃）</td><td>默认端口 18767，可 <code>--minutes</code>/<code>--no-open</code></td></tr>
+      <tr><td><code>scripts/test-userscript.mjs</code></td><td>假登录页 + Playwright 测试（103 断言）</td><td>自动生成 <code>.cache/test/debug.user.js</code>（含夹具账号）与 <code>debug-empty.user.js</code></td></tr>
+      <tr><td><code>scripts/lib/cockpit-store.mjs</code></td><td>只读解密 <code>~/.cockpit_tools/codex_accounts</code>（AES-256-GCM）</td><td>不写任何 Cockpit 文件</td></tr>
+      <tr><td><code>scripts/lib/totp-code.mjs</code></td><td>向取码服务查当前验证码（无 2FA 密钥的账号用）</td><td>POST <code>2fa.nloop.cc/api/mfa/lookup</code></td></tr>
+      <tr><td><code>scripts/login.mjs</code></td><td>实验性全自动登录（未纳入日常方案，可删）</td><td>驱动 <code>codex login</code> + Playwright</td></tr>
+      <tr><td><code>.cache/</code> <code>log/</code> <code>node_modules/</code></td><td>临时/依赖，已 gitignore</td><td>可整目录删除重建</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="env">
+  <h2>4. 环境依赖与运行 / 复现方法</h2>
+  <pre><code>cd /Users/seraku/Documents/DSH/cockpit-autologin
+node scripts/gen-userscript.mjs              # 生成（默认不内嵌任何真实账号）
+node scripts/install.mjs                     # 本地起安装页（Safari 打开 http://127.0.0.1:18767/）
+node scripts/test-userscript.mjs             # 103 项断言，需本机 Chrome
+node --check userscript/template.user.js</code></pre>
+  <ul>
+    <li><b>依赖：</b>Node 24（<code>node --version</code> 已验证 v24.x）、<code>playwright-core</code>（已装于 <code>node_modules/</code>）、本机 Google Chrome（<code>/Applications/Google Chrome.app</code>）、<code>/Applications/Tampermonkey.app</code> 5.6.6243。</li>
+    <li><b>前置条件：</b>生成内嵌账号需要 <code>~/.cockpit_tools</code>（含 <code>secure-account-storage.key</code>）；测试不需要任何真实账号（用 <code>--fixture</code>）。</li>
+    <li><b>耗时提示：</b>测试约 2–4 分钟；含多次 1.2–12 秒等待（验证码过期重取）。</li>
+  </ul>
+</section>
+
+<section id="done">
+  <h2>5. 已完成事项与验证结果</h2>
+  <table>
+    <thead><tr><th>事项</th><th>关键结果</th><th>验证方式与结果</th><th>证据位置</th></tr></thead>
+    <tbody>
+      <tr><td>面板入口</td><td>点 Tampermonkey 图标 → 菜单命令「Cockpit 自动填：打开/关闭面板」；默认隐藏</td><td><span class="confirmed">已验证</span>：面板默认隐藏/菜单出现/再点收起 3 条断言通过</td><td><code>userscript/template.user.js</code>（GM_registerMenuCommand、setPanelOpen）</td></tr>
+      <tr><td>粘贴识别</td><td>支持 <code>邮箱----密码</code>、<code>|</code>/<code>:</code>/空格、密码在前、<code>password:/pass:/pwd:</code>、中文标签、<code>2FA: base32</code>、辅助邮箱标签</td><td><span class="confirmed">已验证</span>：解析与回读断言全绿</td><td><code>parsePasted()</code> / <code>extractTwofa()</code> / <code>extractAuxEmail()</code></td></tr>
+      <tr><td>只填不提交</td><td>无 submit/location/window.open；每条填充断言表单未提交</td><td><span class="confirmed">已验证</span></td><td><code>test-userscript.mjs</code> 中「未提交表单」断言</td></tr>
+      <tr><td>确认策略</td><td>一次登录只确认一次；换账号重置；手动「填入」也确认</td><td><span class="confirmed">已验证</span>：密码步不再弹确认、SPA 换步不重复确认</td><td><code>doFill()</code> 的 confirmedAccount 逻辑</td></tr>
+      <tr><td>本地 TOTP</td><td>RFC 6238（SHA-1/30s/6 位），与 Node 独立实现逐位一致；有密钥时不请求取码接口</td><td><span class="confirmed">已验证</span></td><td><code>totpCode()</code>；测试「2FA：本地 TOTP 算法与独立实现一致」</td></tr>
+      <tr><td>辅助邮箱（v2.2.0）</td><td>第三个框可填取码邮箱；取码时用该邮箱而非登录邮箱</td><td><span class="confirmed">已验证</span>：断言「按辅助邮箱取码」请求体邮箱正确</td><td><code>normalizeCode()</code> / <code>fillCode()</code></td></tr>
+      <tr><td>三个框必填（v2.2.0）</td><td>无 2FA 时第三框自动填登录邮箱；留空保存回落登录邮箱；密码为空拒绝保存</td><td><span class="confirmed">已验证</span>：3 条断言通过</td><td><code>saveCurrent()</code> / <code>updateAccount()</code></td></tr>
+      <tr><td>保存/管理/编辑/删除/导出</td><td>GM 存储 <code>cockpit_saved_accounts</code>、隐藏名单 <code>cockpit_hidden_accounts</code>；导出格式 <code>邮箱----密码[ 2FA: …][ AUX: …]</code></td><td><span class="confirmed">已验证</span></td><td><code>renderManage()</code> / <code>buildExportText()</code></td></tr>
+      <tr><td>仓库脱敏并推送</td><td>真实邮箱/密码/令牌 0 泄漏；测试改用 <code>--fixture</code> 假账号 + 取码桩</td><td><span class="confirmed">已验证</span>：解密真实凭据逐条精确比对 0 命中</td><td>git 提交 <code>d264e2f</code>；<code>gh repo view</code></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="pending">
+  <h2>6. 未完成 / 进行中事项</h2>
+  <table>
+    <thead><tr><th>事项</th><th>状态</th><th>已尝试（含失败尝试）</th><th>建议做法</th></tr></thead>
+    <tbody>
+      <tr><td>v2.2.0 提交/推送</td><td class="st-wip">进行中</td><td>无失败尝试；仅未执行 git 操作</td><td>测试绿后提交；用户明确要推送再 push</td></tr>
+      <tr><td>Safari 内实机验证</td><td class="st-todo">待做</td><td>当前 agent 无法控制用户 Safari（AppleScript 权限被拒 <code>-10004</code>）；真实登录页未由脚本实测</td><td>让用户装好后在 <code>auth.openai.com</code> 实际登录一次；异常看面板状态行</td></tr>
+      <tr><td>Safari 拖放崩溃</td><td class="st-done">已绕过</td><td>拖 .user.js 进 Safari 触发 WebKit <code>performDragOperation</code> SIGSEGV（crash 报告 <code>~/Library/Logs/DiagnosticReports/Safari-2026-11-02-0003*.ips</code>）</td><td>改用 <code>node scripts/install.mjs</code> 的本地 HTTP 安装页</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="decisions">
+  <h2>7. 关键决策与原因</h2>
+  <table>
+    <thead><tr><th>决策</th><th>被放弃的备选</th><th>原因</th></tr></thead>
+    <tbody>
+      <tr><td>油猴脚本（Tampermonkey）</td><td>自建 Chrome CDP 自动化、改 Cockpit 数据</td><td>用户提出油猴；不碰 App 数据；AppleScript 权限被系统拒绝</td></tr>
+      <tr><td>面板由菜单命令打开</td><td>页面自动弹面板</td><td>用户要求点插件图标才出现</td></tr>
+      <tr><td>本地算 TOTP</td><td>打开 2fa.fun / browserscan 查码</td><td>不联网、不限流、不把密钥交给第三方</td></tr>
+      <tr><td>一次登录只确认一次</td><td>每步确认（早期版本）</td><td>用户要求减少打扰；确认框仍保留第一次</td></tr>
+      <tr><td>第三个框二合一</td><td>分开的 2FA 框 + 辅助邮箱框</td><td>用户要求合并；无 2FA 时自动填登录邮箱</td></tr>
+      <tr><td>测试用 fixture + 取码桩</td><td>测试直接读真实账号库</td><td>仓库是 PUBLIC，不能带真实账号；离线可复现</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="risks">
+  <h2>8. 问题、阻塞与红线（不要做）</h2>
+  <ul>
+    <li>⛔ <b>不要</b>提交 <code>userscript/cockpit-codex-fill.user.js</code>（含明文账号密码；已在 .gitignore）。</li>
+    <li>⛔ <b>不要</b>把 <code>.cache/test/debug.user.js</code> 或任何 <code>--embed</code> 产物提交/外传（内含真实账号）。</li>
+    <li>⛔ <b>不要</b>修改 <code>~/.cockpit_tools</code>（只读来源）。</li>
+    <li>⛔ <b>不要</b>把 .user.js 拖进 Safari 窗口（Safari 27.2 拖放崩溃），用 <code>scripts/install.mjs</code>。</li>
+    <li>⚠️ 仓库是 <b>PUBLIC</b>；提交前必须重跑脱敏检查（见第 9 节第 3 条）。</li>
+    <li>⚠️ 已知坑：<code>template.user.js</code> 被批量替换写坏过两次；改完必须 <code>node --check</code> + 跑测试。</li>
+  </ul>
+</section>
+
+<section id="next">
+  <h2>9. 下一步行动清单（从这继续）</h2>
+  <ol>
+    <li>
+      <b>动作：</b>复跑测试确认 v2.2.0 全绿。<br>
+      <b>起点：</b><code>scripts/test-userscript.mjs</code><br>
+      <b>预期产出：</b>控制台输出「共 103 项断言，✓ 全部通过」，退出码 0<br>
+      <b>完成判定：</b><code>echo $?</code> 为 0
+    </li>
+    <li>
+      <b>动作：</b>提交 3 个改动文件（README / 测试 / 模板）。<br>
+      <b>起点：</b><code>git status</code> → <code>git add -A &amp;&amp; git commit -m "更新：辅助邮箱与三个框必填（v2.2.0）"</code><br>
+      <b>预期产出：</b>本地新提交<br>
+      <b>完成判定：</b><code>git log --oneline -1</code> 显示新提交；用户要求推送时才 <code>git push</code>
+    </li>
+    <li>
+      <b>动作：</b>提交前重跑脱敏审计（真实邮箱/密码/令牌 0 命中）。<br>
+      <b>起点：</b>项目根目录，用 <code>~/.cockpit_tools</code> 解密后逐条比对暂存文件（参考上一轮脚本）<br>
+      <b>预期产出：</b>「真实密钥/邮箱泄漏: 0」<br>
+      <b>完成判定：</b>命中数 0；否则回滚并替换为示例值
+    </li>
+    <li>
+      <b>动作：</b>用户在 Safari 实机安装并验证一次登录。<br>
+      <b>起点：</b><code>node scripts/install.mjs</code> → Safari 打开 <code>http://127.0.0.1:18767/</code> → 安装 → Cockpit Tools 点登录<br>
+      <b>预期产出：</b>面板出现、填入邮箱/密码/验证码且不自动提交<br>
+      <b>完成判定：</b>用户确认可正常填入；异常按面板状态行定位
+    </li>
+  </ol>
+</section>
+
+<section id="legend">
+  <h2>10. 信息可信度标注约定</h2>
+  <ul>
+    <li><span class="confirmed">确认结论</span>：有证据（测试输出 / 复跑结果 / 文件位置），证据位置已写明。</li>
+    <li><span class="assumed">待验证假设</span>：合理推测但未证实，引用前需先验证。</li>
+    <li><span class="unknown">未确认 / 未记录</span>：查不到或没做，不许当成事实使用。</li>
+  </ul>
+  <p class="note">敏感信息（密钥、token、真实邮箱密码）一律不写入本文档。</p>
+</section>
+
+</main>
+</body>
+</html>

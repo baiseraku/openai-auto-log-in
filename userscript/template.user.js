@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cockpit 登录自动填（Codex / ChatGPT）
 // @namespace    cockpit-autologin
-// @version      2.1.0
+// @version      2.2.0
 // @description  点 Tampermonkey 图标 →「打开面板」，粘贴识别账号、保存到插件、管理删除；填入邮箱 / 密码 / 动态验证码，每次填入前先确认，且不点提交。
 // @author       cockpit-autologin
 // @match        https://auth.openai.com/*
@@ -43,6 +43,7 @@ __CONNECT_LINES__
     debugHost: '',         // 仅调试构建用
     pwOverride: null,   // 粘贴邮箱已在账号库时，用粘贴的密码覆盖库内密码
     twofaOverride: null,// 粘贴带 2FA 密钥时覆盖该账号的 2FA
+    codeEmailOverride: null, // 粘贴带辅助邮箱时覆盖取码邮箱
   };
   try {
     state.account = localStorage.getItem(LS.account) || '';
@@ -130,7 +131,7 @@ __CONNECT_LINES__
         map.set(k, {
           ...base,
           password: s.password || base.password,
-          twofa: s.twofa || base.twofa || '',
+          ...normalizeCode({ email: base.email, twofa: s.twofa || base.twofa || '', codeEmail: s.codeEmail || base.codeEmail || '' }),
           source: '已保存·覆盖',
           saved: true,
         });
@@ -138,7 +139,7 @@ __CONNECT_LINES__
         map.set(k, {
           email: s.email,
           password: s.password || '',
-          twofa: s.twofa || '',
+          ...normalizeCode({ email: s.email, twofa: s.twofa, codeEmail: s.codeEmail }),
           codeApi: s.codeApi || DEFAULT_CODE_API,
           plan: '',
           source: '已保存',
@@ -196,6 +197,7 @@ __CONNECT_LINES__
     const merged = { ...base };
     if (same(state.pwOverride)) merged.password = state.pwOverride.password;
     if (same(state.twofaOverride)) merged.twofa = state.twofaOverride.twofa;
+    if (same(state.codeEmailOverride)) merged.codeEmail = state.codeEmailOverride.codeEmail;
     return merged;
   };
 
@@ -283,7 +285,12 @@ __CONNECT_LINES__
     }
     if (!picked) picked = emails[0];
     if (!pwd && labelPwd) pwd = labelPwd;
-    return { email: picked.email, password: pwd, twofa: extractTwofa(raw, pwd) };
+    return {
+      email: picked.email,
+      password: pwd,
+      twofa: extractTwofa(raw, pwd),
+      auxEmail: extractAuxEmail(raw, picked.email),
+    };
   }
 
   /** 从粘贴文本里抠 2FA 密钥：otpauth:// 链接 / 「2FA: xxx」/ 「密钥：xxx」/ 独立 base32 串 */
@@ -298,6 +305,33 @@ __CONNECT_LINES__
     const standalone = raw.match(/(?:^|[\s,;|])([A-Z2-7]{16,64})(?=$|[\s,;|])/);
     if (standalone && standalone[1] !== String(password || '').toUpperCase()) return standalone[1];
     return '';
+  }
+
+  /** 从粘贴文本里抠辅助邮箱：修改过登录邮箱、但 MFA 仍由原邮箱收码的账号用 */
+  function extractAuxEmail(raw, loginEmail) {
+    const labeled = raw.match(/(?:辅助邮箱|辅助邮箱地址|原邮箱|旧邮箱|舊邮箱|收码邮箱|取码邮箱|验证码邮箱|mfa\s*邮箱|aux(?:iliary)?(?:\s*(?:email|mail))?|code\s*email|verification\s*email)\s*[:：=]\s*([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})/i);
+    if (!labeled) return '';
+    const mail = labeled[1].trim();
+    if (normEmail(mail) === normEmail(loginEmail)) return '';
+    return mail;
+  }
+
+  /** 第三个框（取码方式）补齐规则：填了 base32 就是 2FA；否则用取码邮箱，为空时回落到登录邮箱 */
+  function normalizeCode(rec) {
+    const twofa = String(rec.twofa || '').replace(/[\s\-]/g, '').toUpperCase();
+    if (twofa) return { twofa, codeEmail: '' };
+    return { twofa: '', codeEmail: String(rec.codeEmail || rec.email || '').trim() };
+  }
+
+  /** 2FA 输入框统一解析：填邮箱 → 辅助邮箱；填 base32 → 2FA 密钥（二选一） */
+  function parseCodeField(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return { twofa: '', codeEmail: '' };
+    const mail = raw.match(EMAIL_RE);
+    if (mail && mail[0]) return { twofa: '', codeEmail: mail[0] };
+    const secret = raw.replace(/[\s\-]/g, '').toUpperCase();
+    if (/^[A-Z2-7]{16,}$/.test(secret)) return { twofa: secret, codeEmail: '' };
+    return { twofa: '', codeEmail: '', invalid: true };
   }
 
   const maskPassword = (v) => {
@@ -362,7 +396,8 @@ __CONNECT_LINES__
       code = await totpCode(account.twofa);
       item = { remaining: totpRemaining() };
     } else {
-      item = await fetchCode(account);
+      const codeEmail = account.codeEmail || account.email;
+      item = await fetchCode({ codeApi: account.codeApi, email: codeEmail });
       if (item.remaining != null && item.remaining < 6) {
         await sleep((item.remaining + 1) * 1000);
         return fillCode(account, attempt + 1);
@@ -457,7 +492,7 @@ __CONNECT_LINES__
           <div class="mgmt-title" id="edit-label"></div>
           <input id="edit-email" type="text" placeholder="账号（邮箱）">
           <input id="edit-pwd" type="text" placeholder="密码">
-          <input id="edit-2fa" type="text" placeholder="2FA 密钥（base32，可留空）">
+          <input id="edit-2fa" type="text" placeholder="第三个框（必填）：2FA 密钥（base32）或取码邮箱；没有 2FA 就填登录邮箱">
           <div class="row2">
             <button id="edit-save" class="ghost">保存修改</button>
             <button id="edit-cancel" class="ghost">取消</button>
@@ -511,9 +546,14 @@ __CONNECT_LINES__
     if (!acc || (!state.pasted && !state.pwOverride)) { setWho(''); return; }
     const merged = state.pwOverride && normEmail(state.pwOverride.email) === normEmail(acc.email);
     const prefix = merged ? '已合并到库内账号：' : '已识别：';
-    if (!acc.password) { setWho(`${prefix}${acc.email}（无密码，需手动填）${acc.twofa ? ' · 2FA 已配置' : ''}`); return; }
+    const codeSrc = acc.twofa
+      ? ' · 取码：2FA'
+      : (acc.codeEmail && normEmail(acc.codeEmail) !== normEmail(acc.email)
+        ? ` · 取码邮箱 ${acc.codeEmail}`
+        : ' · 取码：登录邮箱');
+    if (!acc.password) { setWho(`${prefix}${acc.email}（无密码，需手动填）${codeSrc}`); return; }
     const shown = state.showPwd ? acc.password : maskPassword(acc.password);
-    const tfa = acc.twofa ? ' · 2FA 已配置' : '';
+    const tfa = codeSrc;
     setWho(`${prefix}${acc.email} · 密码 ${shown}${merged ? '（覆盖库内密码）' : ''}${tfa}（点此显示/隐藏）`);
   }
 
@@ -552,6 +592,7 @@ __CONNECT_LINES__
       state.pasted = null;
       state.pwOverride = null;
       state.twofaOverride = null;
+      state.codeEmailOverride = null;
       rebuildSelect();
       acctSel.value = state.account || '';
       setWho(text && text.trim() ? '没识别到邮箱，检查粘贴内容' : '');
@@ -564,6 +605,7 @@ __CONNECT_LINES__
       state.pasted = null;
       state.pwOverride = parsed.password ? { email: known.email, password: parsed.password } : null;
       state.twofaOverride = parsed.twofa ? { email: known.email, twofa: parsed.twofa } : null;
+      state.codeEmailOverride = parsed.auxEmail ? { email: known.email, codeEmail: parsed.auxEmail } : null;
       state.account = known.email;
       rebuildSelect();
       acctSel.value = known.email;
@@ -572,10 +614,12 @@ __CONNECT_LINES__
       // 全新邮箱：用临时粘贴条目
       state.pwOverride = null;
       state.twofaOverride = null;
+      state.codeEmailOverride = null;
       state.pasted = {
         email: parsed.email,
         password: parsed.password,
         twofa: parsed.twofa || '',
+        codeEmail: parsed.auxEmail || '',
         codeApi: DEFAULT_CODE_API,
         plan: '',
       };
@@ -596,6 +640,7 @@ __CONNECT_LINES__
       state.pasted = null;
       state.pwOverride = null;
       state.twofaOverride = null;
+      state.codeEmailOverride = null;
       state.account = v;
       try { localStorage.setItem(LS.account, state.account); } catch {}
       rebuildSelect();
@@ -667,7 +712,7 @@ __CONNECT_LINES__
       section('库内账号（来自 Cockpit 账号库）');
       for (const a of visibleEmbedded) {
         rowFor(
-          `${a.email}${a.plan && a.plan !== 'free' ? ' · ' + a.plan : ''}${a.twofa ? ' · 2FA' : ''}`,
+          `${a.email}${a.plan && a.plan !== 'free' ? ' · ' + a.plan : ''}${a.twofa ? ' · 2FA' : (a.codeEmail && normEmail(a.codeEmail) !== normEmail(a.email) ? ' · 取码邮箱' : '')}`,
           () => deleteEmbedded(a.email),
           `删除 ${a.email}`,
           [editBtn(a.email)],
@@ -679,7 +724,7 @@ __CONNECT_LINES__
     if (!savedAccounts.length) empty('还没有保存的账号');
     for (const item of savedAccounts) {
       rowFor(
-        `${item.email} · ${item.password ? maskPassword(item.password) : '无密码'}${item.twofa ? ' · 2FA' : ''}`,
+        `${item.email} · ${item.password ? maskPassword(item.password) : '无密码'}${item.twofa ? ' · 2FA' : (item.codeEmail && normEmail(item.codeEmail) !== normEmail(item.email) ? ' · 取码邮箱' : '')}`,
         () => deleteSaved(item.email),
         `删除 ${item.email}`,
         [editBtn(item.email)],
@@ -726,7 +771,7 @@ __CONNECT_LINES__
     $('edit-label').textContent = `编辑：${email}`;
     $('edit-email').value = email;
     $('edit-pwd').value = acc ? (acc.password || '') : '';
-    $('edit-2fa').value = acc ? (acc.twofa || '') : '';
+    $('edit-2fa').value = acc ? (acc.twofa || acc.codeEmail || acc.email || '') : email;
     $('edit').style.display = 'block';
   }
   function closeEditForm() {
@@ -734,16 +779,38 @@ __CONNECT_LINES__
     $('edit').style.display = 'none';
   }
 
-  /** 手动修改账号：账号 / 密码 / 2FA 密钥（改库内账号会生成一条「已保存·覆盖」） */
+  /** 手动修改账号：账号 / 密码 / 2FA 密钥或辅助邮箱（改库内账号会生成一条「已保存·覆盖」） */
   function updateAccount(origEmail, fields = {}) {
     const newEmail = String(fields.email != null ? fields.email : origEmail).trim();
     if (!newEmail || !EMAIL_FULL_RE.test(newEmail)) { setStatus('邮箱格式不对，未保存', true); return false; }
     const existing = savedAccounts.find((x) => normEmail(x.email) === normEmail(origEmail));
     const wasEmbedded = ACCOUNTS.some((a) => normEmail(a.email) === normEmail(origEmail));
+    const current = allAccounts().find((a) => normEmail(a.email) === normEmail(origEmail));
+    let twofa = existing ? (existing.twofa || '') : (current ? (current.twofa || '') : '');
+    let codeEmail = existing ? (existing.codeEmail || '') : (current ? (current.codeEmail || '') : '');
+    if (fields.code != null) {
+      const rawCode = String(fields.code).trim();
+      if (rawCode) {
+        const parsed = parseCodeField(rawCode);
+        if (parsed.invalid) { setStatus('第三个框要填 2FA 密钥（base32）或取码邮箱，格式不对', true); return false; }
+        twofa = parsed.twofa;
+        codeEmail = parsed.codeEmail;
+      } else {
+        twofa = '';
+        codeEmail = '';   // 留空 → 自动用登录邮箱
+      }
+    } else {
+      if (fields.twofa != null) twofa = String(fields.twofa).replace(/[\s\-]/g, '').toUpperCase();
+      if (fields.codeEmail != null) codeEmail = String(fields.codeEmail).trim();
+    }
+    const finalPassword = fields.password != null ? String(fields.password) : (existing ? existing.password : '');
+    if (!String(finalPassword).trim()) { setStatus('密码不能为空：三个框都要填满', true); return false; }
+    const code = normalizeCode({ email: newEmail, twofa, codeEmail });
     const rec = {
       email: newEmail,
-      password: fields.password != null ? String(fields.password) : (existing ? existing.password : ''),
-      twofa: fields.twofa != null ? String(fields.twofa).replace(/[\s\-]/g, '').toUpperCase() : (existing ? existing.twofa : ''),
+      password: finalPassword,
+      twofa: code.twofa,
+      codeEmail: code.codeEmail,
       codeApi: (existing && existing.codeApi) || DEFAULT_CODE_API,
       savedAt: Date.now(),
     };
@@ -757,11 +824,13 @@ __CONNECT_LINES__
     state.pasted = null;
     state.pwOverride = null;
     state.twofaOverride = null;
+    state.codeEmailOverride = null;
     rebuildSelect();
     acctSel.value = newEmail;
     closeEditForm();
     renderManage();
-    setStatus(`已更新 ${newEmail}${rec.twofa ? '（含 2FA）' : ''}`);
+    const tag = rec.twofa ? '（2FA 取码）' : `（邮箱取码：${rec.codeEmail}）`;
+    setStatus(`已更新 ${newEmail}${tag}`);
     refreshStep();
     return true;
   }
@@ -771,7 +840,7 @@ __CONNECT_LINES__
     updateAccount(editingEmail, {
       email: $('edit-email').value,
       password: $('edit-pwd').value,
-      twofa: $('edit-2fa').value,
+      code: $('edit-2fa').value,
     });
   });
   $('edit-cancel').addEventListener('click', closeEditForm);
@@ -779,10 +848,13 @@ __CONNECT_LINES__
   function saveCurrent() {
     const acc = currentAccount();
     if (!acc || !acc.email) { setStatus('没有可保存的账号，先粘贴识别或选一个', true); return; }
+    if (!String(acc.password || '').trim()) { setStatus('密码为空：三个框都要填满，先到「管理 → ✎」补上密码', true); return; }
+    const code = normalizeCode({ email: acc.email, twofa: acc.twofa, codeEmail: acc.codeEmail });
     const rec = {
       email: acc.email,
-      password: acc.password || '',
-      twofa: acc.twofa || '',
+      password: acc.password,
+      twofa: code.twofa,
+      codeEmail: code.codeEmail,
       codeApi: acc.codeApi || DEFAULT_CODE_API,
       savedAt: Date.now(),
     };
@@ -823,8 +895,11 @@ __CONNECT_LINES__
       const k = normEmail(a.email);
       if (seen.has(k)) continue;
       seen.add(k);
-      const tfa = a.twofa ? ` 2FA: ${a.twofa}` : '';
-      lines.push(`${a.email}----${a.password || ''}${tfa}`);
+      const code = normalizeCode(a);
+      const codeTag = code.twofa
+        ? ` 2FA: ${code.twofa}`
+        : (code.codeEmail && normEmail(code.codeEmail) !== normEmail(a.email) ? ` AUX: ${code.codeEmail}` : '');
+      lines.push(`${a.email}----${a.password || ''}${codeTag}`);
     }
     return lines.join('\n');
   }
@@ -1038,6 +1113,10 @@ __CONNECT_LINES__
         twofaOf: (email) => {
           const a = allAccounts().find((x) => normEmail(x.email) === normEmail(email));
           return a ? (a.twofa || '') : '';
+        },
+        codeEmailOf: (email) => {
+          const a = allAccounts().find((x) => normEmail(x.email) === normEmail(email));
+          return a ? (a.codeEmail || '') : '';
         },
         totp: (secret) => totpCode(secret),
         export: () => exportAccounts(),
